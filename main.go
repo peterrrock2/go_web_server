@@ -1,23 +1,42 @@
 package main
 
 import (
+	"chirpy/internal/database"
+	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
+	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 )
 
 type apiConfig struct {
 	fileserverHits int
+	DB             *database.DB
+	JWTSecret      string
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 
 func main() {
-	cfg := &apiConfig{}
-	r := chi.NewRouter()
-	r2 := chi.NewRouter()
+	godotenv.Load()
 
-	r.Use(middlewareCors)
+	db, err := database.NewDB("database.json")
+	if err != nil {
+		log.Fatalf("Error creating database: %s\n", err)
+	}
+
+	cfg := &apiConfig{
+		fileserverHits: 0,
+		DB:             db,
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+	}
+	mainRouter := chi.NewRouter()
+
+	mainRouter.Use(middlewareCors)
 
 	fsHandler := cfg.middlewareMetricsInc(
 		http.StripPrefix(
@@ -26,60 +45,42 @@ func main() {
 		),
 	)
 
-	r.Handle("/app", fsHandler)
-	r.Handle("/app/*", fsHandler)
+	mainRouter.Handle("/app", fsHandler)
+	mainRouter.Handle("/app/*", fsHandler)
 
-	r2.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	apiRouter := chi.NewRouter()
+	apiRouter.Get("/healthz", readinessHandler)
+	apiRouter.Get("/reset", cfg.resetHandler)
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	apiRouter.Post("/chirps", cfg.chirpsCreateHandler)
+	apiRouter.Get("/chirps", cfg.chirpsGetAllHandler)
+	apiRouter.Get("/chirps/{id}", cfg.chirpsGetHandler)
 
-	r2.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hits: " + strconv.Itoa(cfg.fileserverHits)))
-	})
+	apiRouter.Post("/users", cfg.usersCreateHandler)
+	apiRouter.Put("/users", cfg.usersUpdateHandler)
 
-	r2.Get("/reset", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		cfg.fileserverHits = 0
-		w.Write([]byte("Hits reset"))
-	})
+	apiRouter.Post("/login", cfg.loginHandler)
 
-	r.Mount("/api", r2)
+	mainRouter.Mount("/api", apiRouter)
+
+	adminRouter := chi.NewRouter()
+	adminRouter.Get("/metrics", cfg.metricsGetHandler)
+
+	mainRouter.Mount("/admin", adminRouter)
 
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: r,
+		Handler: mainRouter,
 	}
-	server.ListenAndServe()
+
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Error starting server: %s\n", err)
 	}
 }
 
-func middlewareCors(next http.Handler) http.Handler {
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "*")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			cfg.fileserverHits++
-			next.ServeHTTP(w, r)
-		},
-	)
+func somethingWentWrong(w http.ResponseWriter, r *http.Request) {
+	if err := recover(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Something went wrong"})
+	}
 }
