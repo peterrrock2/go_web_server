@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,9 +11,7 @@ import (
 )
 
 func (cfg *apiConfig) usersUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("usersUpdateHandler")
-
-	defer somethingWentWrong(w, r)
+	defer somethingWentWrong(w)
 
 	authorization := r.Header.Get("Authorization")
 	if authorization == "" {
@@ -24,7 +21,6 @@ func (cfg *apiConfig) usersUpdateHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	authorization = strings.TrimPrefix(authorization, "Bearer ")
-	fmt.Println(authorization)
 
 	token, err := cfg.parseToken(authorization)
 	if err != nil {
@@ -40,7 +36,11 @@ func (cfg *apiConfig) usersUpdateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	fmt.Println("Found subject ", claims.Subject)
+	if claims.Issuer != "chirpy-access" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Unauthorized"})
+		return
+	}
 
 	var updatedUser User
 	if err := json.NewDecoder(r.Body).Decode(&updatedUser); err != nil {
@@ -65,7 +65,7 @@ func (cfg *apiConfig) usersUpdateHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(user.ToUserResponse(""))
+	json.NewEncoder(w).Encode(user.ToUserResponse("", ""))
 }
 
 func (cfg *apiConfig) parseToken(tokenString string) (*jwt.Token, error) {
@@ -74,7 +74,7 @@ func (cfg *apiConfig) parseToken(tokenString string) (*jwt.Token, error) {
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("Unexpected signing method")
+			return nil, errors.New("unexpected signing method")
 		}
 		return []byte(cfg.JWTSecret), nil
 	})
@@ -84,7 +84,7 @@ func (cfg *apiConfig) parseToken(tokenString string) (*jwt.Token, error) {
 	}
 
 	if !token.Valid {
-		return nil, errors.New("Invalid token")
+		return nil, errors.New("invalid token")
 	}
 
 	return token, nil

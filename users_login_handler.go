@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,20 +10,19 @@ import (
 )
 
 type LoginRequest struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type LoginResponse struct {
-	Id    int    `json:"id"`
-	Email string `json:"email"`
-	Token string `json:"token"`
+	Id           int    `json:"id"`
+	Email        string `json:"email"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("loginHandler")
-	defer somethingWentWrong(w, r)
+	defer somethingWentWrong(w)
 
 	var loginRequest LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&loginRequest); err != nil {
@@ -32,7 +30,6 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid JSON"})
 		return
 	}
-	fmt.Println(loginRequest)
 
 	user, err := cfg.DB.GetUserByEmail(loginRequest.Email)
 	if err != nil {
@@ -47,13 +44,14 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if loginRequest.ExpiresInSeconds <= 0 {
-		loginRequest.ExpiresInSeconds = 24 * 60 * 60
+	access_token, err := cfg.generateAccessToken(user.Id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Error creating token"})
+		return
 	}
-	loginRequest.ExpiresInSeconds = min(loginRequest.ExpiresInSeconds, 24*60*60)
-	fmt.Println(loginRequest.ExpiresInSeconds)
-	token, err := cfg.generateToken(user.Id, loginRequest.ExpiresInSeconds)
-	fmt.Println(token)
+
+	refresh_token, err := cfg.generateRefreshToken(user.Id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Error creating token"})
@@ -62,18 +60,32 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(user.ToUserResponse(token)); err != nil {
+	if err := json.NewEncoder(w).Encode(user.ToUserResponse(access_token, refresh_token)); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Error encoding response"})
 		return
 	}
 }
 
-func (cfg *apiConfig) generateToken(userId, expiresInSeconds int) (string, error) {
+func (cfg *apiConfig) generateAccessToken(userId int) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+		Issuer:    "chirpy-access",
 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Second * time.Duration(expiresInSeconds)).UTC()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24).UTC()),
+		Subject:   strconv.Itoa(userId),
+	})
+	tokenString, err := token.SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+func (cfg *apiConfig) generateRefreshToken(userId int) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy-refresh",
+		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 60).UTC()),
 		Subject:   strconv.Itoa(userId),
 	})
 	tokenString, err := token.SignedString([]byte(cfg.JWTSecret))

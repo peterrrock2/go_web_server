@@ -7,12 +7,13 @@ import (
 )
 
 type Chirp struct {
-	Body string `json:"body"`
-	Id   int    `json:"id"`
+	AuthorId int    `json:"author_id"`
+	Body     string `json:"body"`
+	Id       int    `json:"id"`
 }
 
 // GetChirps returns all chirps in the database
-func (db *DB) GetChirps() ([]Chirp, error) {
+func (db *DB) GetChirps(id int) ([]Chirp, error) {
 	dbStructure, err := db.loadDB()
 	if err != nil {
 		return nil, err
@@ -20,7 +21,11 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 
 	var chirpsArray []Chirp
 	for _, chirp := range dbStructure.Chirps {
-		chirpsArray = append(chirpsArray, chirp)
+		if id == -1 {
+			chirpsArray = append(chirpsArray, chirp)
+		} else if chirp.AuthorId == id {
+			chirpsArray = append(chirpsArray, chirp)
+		}
 	}
 
 	sort.Slice(chirpsArray, func(i, j int) bool {
@@ -45,16 +50,17 @@ func (db *DB) GetChirp(id int) (Chirp, error) {
 }
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateChirp(body string) (Chirp, error) {
-	allChirps, err := db.GetChirps()
+func (db *DB) CreateChirp(author_id int, body string) (Chirp, error) {
+	allChirps, err := db.GetChirps(-1)
 	if err != nil {
 		return Chirp{}, err
 	}
 	dbStructure, _ := db.loadDB()
 
 	newChirp := Chirp{
-		Body: body,
-		Id:   len(allChirps) + 1,
+		AuthorId: author_id,
+		Body:     body,
+		Id:       len(allChirps) + 1,
 	}
 
 	allChirps = append(allChirps, newChirp)
@@ -64,7 +70,7 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 		chirps[chirp.Id] = chirp
 	}
 
-	chirps_json, err := json.Marshal(DBStructure{Chirps: chirps, Users: dbStructure.Users})
+	chirps_json, err := json.Marshal(DBStructure{Chirps: chirps, Users: dbStructure.Users, RevokedTokens: dbStructure.RevokedTokens})
 	if err != nil {
 		return Chirp{}, err
 	}
@@ -78,4 +84,33 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	}
 
 	return newChirp, nil
+}
+
+func (db *DB) RemoveChirp(id int) error {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	_, ok := dbStructure.Chirps[id]
+	if !ok {
+		return ErrNotExist
+	}
+
+	delete(dbStructure.Chirps, id)
+
+	chirps_json, err := json.Marshal(DBStructure{Chirps: dbStructure.Chirps, Users: dbStructure.Users, RevokedTokens: dbStructure.RevokedTokens})
+	if err != nil {
+		return err
+	}
+
+	db.mux.Lock()
+	err = os.WriteFile(db.path, chirps_json, 0644)
+	db.mux.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

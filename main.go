@@ -55,11 +55,17 @@ func main() {
 	apiRouter.Post("/chirps", cfg.chirpsCreateHandler)
 	apiRouter.Get("/chirps", cfg.chirpsGetAllHandler)
 	apiRouter.Get("/chirps/{id}", cfg.chirpsGetHandler)
+	apiRouter.Delete("/chirps/{id}", cfg.chirpsRemoveHandler)
 
 	apiRouter.Post("/users", cfg.usersCreateHandler)
 	apiRouter.Put("/users", cfg.usersUpdateHandler)
 
 	apiRouter.Post("/login", cfg.loginHandler)
+
+	apiRouter.Post("/refresh", cfg.refreshHandler)
+	apiRouter.Post("/revoke", cfg.revokeHandler)
+
+	apiRouter.Post("/polka/webhooks", cfg.polkaWebhookHandler)
 
 	mainRouter.Mount("/api", apiRouter)
 
@@ -78,7 +84,7 @@ func main() {
 	}
 }
 
-func somethingWentWrong(w http.ResponseWriter, r *http.Request) {
+func somethingWentWrong(w http.ResponseWriter) {
 	if err := recover(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Something went wrong"})

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 )
 
@@ -13,8 +12,7 @@ type User struct {
 }
 
 func (cfg *apiConfig) usersCreateHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("usersCreateHandler")
-	defer somethingWentWrong(w, r)
+	defer somethingWentWrong(w)
 
 	var newUser User
 	if err := json.NewDecoder(r.Body).Decode(&newUser); err != nil {
@@ -32,7 +30,7 @@ func (cfg *apiConfig) usersCreateHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(createdUser.ToUserResponse("")); err != nil {
+	if err := json.NewEncoder(w).Encode(createdUser.ToUserResponse("", "")); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Error encoding response"})
 		return

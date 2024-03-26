@@ -6,19 +6,24 @@ type User struct {
 	Id       int    `json:"id"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Red      bool   `json:"is_chirpy_red"`
 }
 
 type UserResponse struct {
-	Email string `json:"email"`
-	Id    int    `json:"id"`
-	Token string `json:"token,omitempty"`
+	Email        string `json:"email"`
+	Id           int    `json:"id"`
+	Token        string `json:"token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Red          bool   `json:"is_chirpy_red"`
 }
 
-func (u *User) ToUserResponse(token string) UserResponse {
+func (u *User) ToUserResponse(access_token, refresh_token string) UserResponse {
 	return UserResponse{
-		Id:    u.Id,
-		Email: u.Email,
-		Token: token,
+		Id:           u.Id,
+		Email:        u.Email,
+		Token:        access_token,
+		RefreshToken: refresh_token,
+		Red:          u.Red,
 	}
 }
 
@@ -50,6 +55,7 @@ func (db *DB) CreateUsers(email, password string) (User, error) {
 		Id:       id,
 		Email:    email,
 		Password: string(cryptPass),
+		Red:      false,
 	}
 	dbStructure.Users[id] = newUser
 
@@ -60,7 +66,6 @@ func (db *DB) CreateUsers(email, password string) (User, error) {
 	return newUser, nil
 }
 
-// GetUsers returns all users in the database
 func (db *DB) GetUser(id int) (User, error) {
 	dbStructure, err := db.loadDB()
 	if err != nil {
@@ -132,4 +137,17 @@ func (db *DB) UpdateUser(id int, email, password string) (User, error) {
 		return User{}, err
 	}
 	return user, nil
+}
+
+func (db *DB) UpgradeUser(id int) error {
+	dbStructure, _ := db.loadDB()
+	user, ok := dbStructure.Users[id]
+	if !ok {
+		return ErrNotExist
+	}
+
+	user.Red = true
+	dbStructure.Users[id] = user
+	db.WriteDB(dbStructure)
+	return nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"chirpy/internal/database"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -10,7 +11,25 @@ import (
 )
 
 func (cfg *apiConfig) chirpsGetAllHandler(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.DB.GetChirps()
+	s := r.URL.Query().Get("author_id")
+	// s is a string that contains the value of the author_id query parameter
+	// if it exists, or an empty string if it doesn't
+
+	var author_id int
+	var dbChirps []database.Chirp
+	var err error
+	if s != "" {
+		author_id, err = strconv.Atoi(s)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid author ID"})
+			return
+		}
+	} else {
+		author_id = -1
+	}
+
+	dbChirps, err = cfg.DB.GetChirps(author_id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "Could not retrieve any chirps"})
@@ -18,11 +37,21 @@ func (cfg *apiConfig) chirpsGetAllHandler(w http.ResponseWriter, r *http.Request
 
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
-		chirps = append(chirps, Chirp{Id: dbChirp.Id, Body: dbChirp.Body})
+		chirps = append(chirps, Chirp{AuthorId: dbChirp.AuthorId, Id: dbChirp.Id, Body: dbChirp.Body})
+	}
+
+	var sortasc bool
+	if r.URL.Query().Get("sort") == "desc" {
+		sortasc = false
+	} else {
+		sortasc = true
 	}
 
 	sort.Slice(chirps, func(i, j int) bool {
-		return chirps[i].Id < chirps[j].Id
+		if sortasc {
+			return chirps[i].Id < chirps[j].Id
+		}
+		return chirps[i].Id > chirps[j].Id
 	})
 
 	w.Header().Set("Content-Type", "application/json")
